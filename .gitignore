@@ -1,0 +1,31 @@
+# Model dosyaları (çok büyük)
+models/
+*.prior
+*.chkpt
+
+# Receptor dosyaları (kullanıcı kendi ekler)
+receptor/
+*.pdbqt
+*_fixed.pdb
+
+# Sonuçlar (her çalıştırmada değişir)
+results/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Geçici dosyalar
+*.tmp
+*.log
+.env
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# vina executable (OS'e göre farklı)
+vina.exe
+vina
