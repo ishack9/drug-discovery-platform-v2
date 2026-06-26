@@ -1,14 +1,14 @@
 """
-Ilac Kesif Platformu v2 — admet-ai Istemcisi
-admet-ai ile 50+ ADMET ozelligini lokal olarak tahmin eder.
-EGFR/kanser odakli skorlama ve trafik isigi sistemi.
+Drug Discovery Platform v2 — admet-ai Client
+Predicts 50+ ADMET properties locally using admet-ai.
+EGFR/cancer-focused scoring with traffic light system.
 """
 import math
 import config
 
-# ── Ozellik Tanimi ────────────────────────────────────────────────────────────
+# ── Property Definitions ──────────────────────────────────────────────────────
 
-# Kırmızı=kotu(0-3), Sari=orta(4-6), Yesil=iyi(7-10)
+# Red=bad(0-3), Yellow=moderate(4-6), Green=good(7-10)
 TRAFFIC_THRESHOLDS = {
     "hERG":                  {"red": 0.4,  "yellow": 0.7,  "invert": True},
     "AMES":                  {"red": 0.4,  "yellow": 0.7,  "invert": True},
@@ -25,32 +25,32 @@ TRAFFIC_THRESHOLDS = {
     "Pgp_Broccatelli":       {"red": 0.4,  "yellow": 0.7,  "invert": True},
 }
 
-# EGFR/kanser icin kritik ozellikler ve agirliklari
+# Critical properties and weights for EGFR/cancer
 SCORING_WEIGHTS = {
-    # Toksisite (negatif — dusuk olmali)
-    "hERG":                  (-2.5, True),   # Kardiyotoksisite — kritik
-    "AMES":                  (-2.0, True),   # Mutajenite
-    "DILI":                  (-3.0, True),   # Karaciger toksisitesi — kritik
-    "ClinTox":               (-1.5, True),   # Klinik toksisite
-    "Carcinogens_Lagunin":   (-1.0, True),   # Karsinojenite
-    # BiyoyararlIlik (pozitif — yuksek olmali)
-    "Bioavailability_Ma":    (2.0,  False),  # Oral biyoyararlilik
-    "HIA_Hou":               (1.5,  False),  # Intestinal absorbsiyon
-    "Lipinski":              (1.5,  False),  # Lipinski kurali
+    # Toxicity (negative — should be low)
+    "hERG":                  (-2.5, True),   # Cardiotoxicity — critical
+    "AMES":                  (-2.0, True),   # Mutagenicity
+    "DILI":                  (-3.0, True),   # Liver toxicity — critical
+    "ClinTox":               (-1.5, True),   # Clinical toxicity
+    "Carcinogens_Lagunin":   (-1.0, True),   # Carcinogenicity
+    # Bioavailability (positive — should be high)
+    "Bioavailability_Ma":    (2.0,  False),  # Oral bioavailability
+    "HIA_Hou":               (1.5,  False),  # Intestinal absorption
+    "Lipinski":              (1.5,  False),  # Lipinski rule
     "QED":                   (1.0,  False),  # Drug-likeness
-    "PAMPA_NCATS":           (1.0,  False),  # Membran gecirgenlik
+    "PAMPA_NCATS":           (1.0,  False),  # Membrane permeability
 }
 
 
 def _traffic_light(prop: str, value: float) -> str:
-    """Ozellik degeri icin trafik isigi rengi dondurur."""
+    """Returns traffic light color for a property value."""
     if prop not in TRAFFIC_THRESHOLDS:
         return "gray"
     t = TRAFFIC_THRESHOLDS[prop]
     invert = t.get("invert", False)
 
     if invert:
-        # Dusuk = iyi (toksisite icin)
+        # Low = good (for toxicity)
         if value < t["red"]:
             return "green"
         elif value < t["yellow"]:
@@ -58,7 +58,7 @@ def _traffic_light(prop: str, value: float) -> str:
         else:
             return "red"
     else:
-        # Yuksek = iyi (biyoyararlilik icin)
+        # High = good (for bioavailability)
         if value > t["yellow"]:
             return "green"
         elif value > t["red"]:
@@ -69,10 +69,10 @@ def _traffic_light(prop: str, value: float) -> str:
 
 def _compute_admet_score(props: dict) -> float:
     """
-    EGFR/kanser odakli ADMET skoru hesaplar (0-10).
-    Toksisite penalize eder, biyoyararlilik odul verir.
+    Computes EGFR/cancer-focused ADMET score (0-10).
+    Penalizes toxicity, rewards bioavailability.
     """
-    score = 7.0  # baslangic skoru
+    score = 7.0  # starting score
 
     for prop, (weight, invert) in SCORING_WEIGHTS.items():
         if prop not in props:
@@ -82,13 +82,13 @@ def _compute_admet_score(props: dict) -> float:
             continue
 
         if invert:
-            # Toksisite: yuksek deger = ceza
+            # Toxicity: high value = penalty
             if val > 0.7:
-                score += weight  # weight negatif
+                score += weight  # weight is negative
             elif val > 0.4:
                 score += weight * 0.5
         else:
-            # Biyoyararlilik: yuksek deger = odul
+            # Bioavailability: high value = reward
             if val > 0.7:
                 score += weight * 0.5
             elif val < 0.3:
@@ -98,33 +98,33 @@ def _compute_admet_score(props: dict) -> float:
 
 
 def _format_props(props: dict) -> dict:
-    """Onemli ozellikleri temiz formatta dondurur."""
+    """Returns important properties in clean format."""
     key_props = {
-        # Toksisite
-        "hERG_kardiyotoksisite":    props.get("hERG", None),
-        "AMES_mutajenite":          props.get("AMES", None),
-        "DILI_karaciger":           props.get("DILI", None),
-        "ClinTox_klinik":           props.get("ClinTox", None),
-        "Karsino jen":              props.get("Carcinogens_Lagunin", None),
-        # Biyoyararlilik
-        "Oral_biyoyararlilik":      props.get("Bioavailability_Ma", None),
-        "Intestinal_absorpsiyon":   props.get("HIA_Hou", None),
-        "Membran_gecirgenlik":      props.get("PAMPA_NCATS", None),
-        "BBB_gecis":                props.get("BBB_Martins", None),
-        "Pgp_substrat":             props.get("Pgp_Broccatelli", None),
+        # Toxicity
+        "hERG_cardiotoxicity":      props.get("hERG", None),
+        "AMES_mutagenicity":        props.get("AMES", None),
+        "DILI_liver_injury":        props.get("DILI", None),
+        "ClinTox_clinical":         props.get("ClinTox", None),
+        "Carcinogenicity":          props.get("Carcinogens_Lagunin", None),
+        # Bioavailability
+        "Oral_bioavailability":     props.get("Bioavailability_Ma", None),
+        "Intestinal_absorption":    props.get("HIA_Hou", None),
+        "Membrane_permeability":    props.get("PAMPA_NCATS", None),
+        "BBB_penetration":          props.get("BBB_Martins", None),
+        "Pgp_substrate":            props.get("Pgp_Broccatelli", None),
         # Drug-likeness
-        "Lipinski_kurali":          props.get("Lipinski", None),
+        "Lipinski_rule":            props.get("Lipinski", None),
         "QED_drug_likeness":        props.get("QED", None),
-        "Caco2_gecirgenlik":        props.get("Caco2_Wang", None),
-        # Fizikokimyasal
-        "Suda_cozunurluk":          props.get("Solubility_AqSolDB", None),
+        "Caco2_permeability":       props.get("Caco2_Wang", None),
+        # Physicochemical
+        "Aqueous_solubility":       props.get("Solubility_AqSolDB", None),
         "LogP":                     props.get("logP", None),
         "TPSA":                     props.get("tpsa", None),
         "MW":                       props.get("molecular_weight", None),
-        # Metabolizma
+        # Metabolism
         "CYP3A4_inhibitor":         props.get("CYP3A4_Veith", None),
         "CYP2D6_inhibitor":         props.get("CYP2D6_Veith", None),
-        "Yarim_omur":               props.get("Half_Life_Obach", None),
+        "Half_life":                props.get("Half_Life_Obach", None),
         "LD50":                     props.get("LD50_Zhu", None),
     }
     return {k: round(float(v), 3) if v is not None and not math.isnan(float(v)) else None
@@ -132,17 +132,17 @@ def _format_props(props: dict) -> dict:
 
 
 def _traffic_summary(props: dict) -> dict:
-    """Her kritik ozellik icin trafik isigi rengi dondurur."""
+    """Returns traffic light color for each critical property."""
     raw_keys = {
-        "hERG_kardiyotoksisite":  "hERG",
-        "AMES_mutajenite":        "AMES",
-        "DILI_karaciger":         "DILI",
-        "ClinTox_klinik":         "ClinTox",
-        "Oral_biyoyararlilik":    "Bioavailability_Ma",
-        "Intestinal_absorpsiyon": "HIA_Hou",
-        "Membran_gecirgenlik":    "PAMPA_NCATS",
-        "Lipinski_kurali":        "Lipinski",
-        "QED_drug_likeness":      "QED",
+        "hERG_cardiotoxicity":   "hERG",
+        "AMES_mutagenicity":     "AMES",
+        "DILI_liver_injury":     "DILI",
+        "ClinTox_clinical":      "ClinTox",
+        "Oral_bioavailability":  "Bioavailability_Ma",
+        "Intestinal_absorption": "HIA_Hou",
+        "Membrane_permeability": "PAMPA_NCATS",
+        "Lipinski_rule":         "Lipinski",
+        "QED_drug_likeness":     "QED",
     }
     result = {}
     for display_key, raw_key in raw_keys.items():
@@ -156,22 +156,22 @@ def _traffic_summary(props: dict) -> dict:
 
 def evaluate_all(candidates: list) -> list:
     """
-    Tum adaylari admet-ai ile degerlendirir.
+    Evaluates all candidates with admet-ai.
 
     Args:
-        candidates: smiles ve id iceren sozluk listesi
+        candidates: list of dicts containing smiles and id
 
     Returns:
-        Her aday icin admet_score, admet_props, admet_traffic eklenmis liste
+        List with admet_score, admet_props, admet_traffic added per candidate
     """
     try:
         from admet_ai import ADMETModel
     except ImportError:
-        print("  HATA: admet-ai kurulu degil! pip install admet-ai")
-        return [{**c, "admet_score": 5.0, "admet_source": "yok",
+        print("  ERROR: admet-ai not installed! pip install admet-ai")
+        return [{**c, "admet_score": 5.0, "admet_source": "none",
                  "admet_props": {}, "admet_traffic": {}} for c in candidates]
 
-    print(f"  admet-ai modeli yukleniyor...")
+    print(f"  Loading admet-ai model...")
     model = ADMETModel()
 
     smiles_list = [c["smiles"] for c in candidates]
@@ -179,13 +179,13 @@ def evaluate_all(candidates: list) -> list:
     batch_size = config.ADMETLAB_BATCH_SIZE
     all_results = []
 
-    print(f"  {total} aday tahmin ediliyor ({(total + batch_size - 1) // batch_size} batch)...")
+    print(f"  Predicting {total} candidates ({(total + batch_size - 1) // batch_size} batches)...")
 
     for i in range(0, total, batch_size):
         batch_smiles = smiles_list[i:i + batch_size]
         batch_no = i // batch_size + 1
         total_b = (total + batch_size - 1) // batch_size
-        print(f"  Batch {batch_no}/{total_b} ({len(batch_smiles)} aday)...")
+        print(f"  Batch {batch_no}/{total_b} ({len(batch_smiles)} candidates)...")
 
         try:
             df = model.predict(smiles=batch_smiles)
@@ -193,7 +193,7 @@ def evaluate_all(candidates: list) -> list:
                 props = row.to_dict()
                 all_results.append(props)
         except Exception as e:
-            print(f"  Batch {batch_no} hatasi: {e}")
+            print(f"  Batch {batch_no} error: {e}")
             for _ in batch_smiles:
                 all_results.append({})
 
@@ -214,6 +214,6 @@ def evaluate_all(candidates: list) -> list:
     green_count  = sum(1 for r in results if r["admet_score"] >= 7.0)
     yellow_count = sum(1 for r in results if 5.0 <= r["admet_score"] < 7.0)
     red_count    = sum(1 for r in results if r["admet_score"] < 5.0)
-    print(f"  admet-ai tamamlandi: Yesil={green_count} Sari={yellow_count} Kirmizi={red_count}")
+    print(f"  admet-ai complete: Green={green_count} Yellow={yellow_count} Red={red_count}")
 
     return results

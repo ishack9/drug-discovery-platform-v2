@@ -1,6 +1,6 @@
 """
-Ilac Kesif Platformu v2 - REINVENT 4 RL Modu
-EGFR hedefine odaklanmis SMILES uretimi.
+Drug Discovery Platform v2 - REINVENT 4 RL Mode
+EGFR-focused SMILES generation using reinforcement learning.
 """
 import os
 import csv
@@ -11,9 +11,9 @@ import sys
 import config
 
 EGFR_REFERENCE_SMILES = [
-    "COCCOc1cc2ncnc(Nc3cccc(Cl)c3F)c2cc1OCCOC",
-    "COc1cc2ncnc(Nc3ccc(F)c(Cl)c3)c2cc1OCCCN1CCOCC1",
-    "CN(C)/C=C/C(=O)Nc1cc2c(Nc3ccc(F)c(Cl)c3)ncnc2cc1OCC1CCN(C)CC1",
+    "COCCOc1cc2ncnc(Nc3cccc(Cl)c3F)c2cc1OCCOC",    # Erlotinib
+    "COc1cc2ncnc(Nc3ccc(F)c(Cl)c3)c2cc1OCCCN1CCOCC1",  # Gefitinib
+    "CN(C)/C=C/C(=O)Nc1cc2c(Nc3ccc(F)c(Cl)c3)ncnc2cc1OCC1CCN(C)CC1",  # Afatinib
 ]
 
 
@@ -117,7 +117,7 @@ def _run_rl(toml_path):
                             timeout=config.RL_TIMEOUT)
     if result.returncode != 0:
         raise RuntimeError(
-            f"REINVENT RL hatasi (kod {result.returncode}):\n"
+            f"REINVENT RL error (code {result.returncode}):\n"
             f"STDERR: {result.stderr[-3000:]}\n"
             f"STDOUT: {result.stdout[-500:]}"
         )
@@ -128,17 +128,15 @@ def _parse_rl_output(output_dir):
     candidates = []
     seen = set()
 
-    # Tekrar eden dosyalari onlemek icin set kullan
+    # Use set to avoid duplicate files
     csv_files = list(set(
         glob.glob(os.path.join(output_dir, "*.csv")) +
         glob.glob(os.path.join(output_dir, "**", "*.csv"), recursive=True)
     ))
 
-
     for csv_file in sorted(csv_files):
         try:
             with open(csv_file, newline="", encoding="utf-8") as f:
-                f.seek(0)
                 reader = csv.DictReader(f)
                 for row in reader:
                     smiles = (row.get("SMILES") or row.get("smiles") or
@@ -151,7 +149,7 @@ def _parse_rl_output(output_dir):
                         seen.add(smiles)
                         candidates.append({"smiles": smiles, "rl_score": score})
         except Exception as e:
-            print(f"  CSV okuma hatasi: {e}")
+            print(f"  CSV read error: {e}")
             continue
 
     candidates.sort(key=lambda x: x["rl_score"], reverse=True)
@@ -170,16 +168,16 @@ def _parse_rl_output(output_dir):
 
 def generate_candidates_rl():
     if not os.path.exists(config.REINVENT_PRIOR_PATH):
-        raise FileNotFoundError(f"Prior model bulunamadi: {config.REINVENT_PRIOR_PATH}")
+        raise FileNotFoundError(f"Prior model not found: {config.REINVENT_PRIOR_PATH}")
 
     agent_path = config.REINVENT_AGENT_PATH
     if not os.path.exists(agent_path):
         import shutil
-        print(f"  Agent dosyasi yok, prior'dan kopyalaniyor: {agent_path}")
+        print(f"  Agent file not found, copying from prior: {agent_path}")
         os.makedirs(os.path.dirname(os.path.abspath(agent_path)), exist_ok=True)
         shutil.copy2(config.REINVENT_PRIOR_PATH, agent_path)
     else:
-        print(f"  Mevcut agent kullaniliyor: {agent_path}")
+        print(f"  Using existing agent: {agent_path}")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         toml_path  = os.path.join(tmpdir, "rl_config.toml")
@@ -187,15 +185,15 @@ def generate_candidates_rl():
 
         _write_rl_toml(toml_path, output_csv, agent_path)
 
-        print(f"  RL egitimi basliyor ({config.RL_MAX_STEPS} adim)...")
+        print(f"  Starting RL training ({config.RL_MAX_STEPS} steps)...")
         _run_rl(toml_path)
 
         candidates = _parse_rl_output(tmpdir)
 
     if not candidates:
-        print("  RL cikti bos, sampling moduna geciliyor...")
+        print("  RL output empty, falling back to sampling mode...")
         from reinvent_runner import generate_candidates
         return generate_candidates()
 
-    print(f"  RL modu: {len(candidates)} EGFR-odakli SMILES uretildi.")
+    print(f"  RL mode: {len(candidates)} EGFR-focused SMILES generated.")
     return candidates

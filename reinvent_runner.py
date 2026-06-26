@@ -1,5 +1,5 @@
 """
-İlaç Keşif Platformu v2 — REINVENT 4 SMILES Üreticisi
+Drug Discovery Platform v2 — REINVENT 4 SMILES Generator
 """
 import os
 import csv
@@ -36,7 +36,7 @@ def _run_reinvent(toml_path: str) -> int:
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if result.returncode != 0:
         raise RuntimeError(
-            f"REINVENT 4 hatası (kod {result.returncode}):\n"
+            f"REINVENT 4 error (code {result.returncode}):\n"
             f"STDERR: {result.stderr[-3000:]}\n"
             f"STDOUT: {result.stdout[-1000:]}"
         )
@@ -70,7 +70,7 @@ def _parse_output(output_csv: str) -> list:
 
 def generate_candidates() -> list:
     if not os.path.exists(config.REINVENT_PRIOR_PATH):
-        raise FileNotFoundError(f"Prior model bulunamadı: {config.REINVENT_PRIOR_PATH}")
+        raise FileNotFoundError(f"Prior model not found: {config.REINVENT_PRIOR_PATH}")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         toml_path  = os.path.join(tmpdir, "reinvent_sample.toml")
@@ -79,15 +79,14 @@ def generate_candidates() -> list:
         _write_toml(toml_path, output_csv)
         _run_reinvent(toml_path)
 
-        # output_file belirtilmişse oraya yazar, yoksa samples.csv varsayılan
         if not os.path.exists(output_csv):
             fallback = os.path.join(tmpdir, "samples.csv")
             if os.path.exists(fallback):
                 output_csv = fallback
             else:
-                raise FileNotFoundError("REINVENT 4 çıktı CSV dosyası bulunamadı.")
+                raise FileNotFoundError("REINVENT 4 output CSV not found.")
 
         candidates = _parse_output(output_csv)
 
-    print(f"  ✓ REINVENT 4: {len(candidates)} SMILES üretildi.")
+    print(f"  ✓ REINVENT 4: {len(candidates)} SMILES generated.")
     return candidates

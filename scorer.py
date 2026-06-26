@@ -1,11 +1,11 @@
 """
-İlaç Keşif Platformu v2 — Skor Hesaplayıcı
+Drug Discovery Platform v2 — Scoring Module
 
-Gerçek hesaplamalı metrikler:
-  - binding_score:           AutoDock Vina (normalize edilmiş)
-  - admet_score:             ADMETlab 3.0 / RDKit
-  - manufacturability_score: RDKit SA Score (sentetik erişilebilirlik)
-  - novelty_score:           Tanimoto çeşitliliği (Morgan parmak izi)
+Metrics:
+  - binding_score:           AutoDock Vina (normalized)
+  - admet_score:             admet-ai
+  - manufacturability_score: RDKit SA Score (synthetic accessibility)
+  - novelty_score:           Tanimoto diversity (Morgan fingerprint)
 """
 import config
 
@@ -13,7 +13,6 @@ try:
     from rdkit import Chem, DataStructs
     from rdkit.Chem import AllChem
     from rdkit.Chem.QED import qed as calc_qed
-    # SA Score (ayrı bir modül olarak rdkit ile gelir)
     try:
         from rdkit.Contrib.SA_Score import sascorer
         _SA_AVAILABLE = True
@@ -25,15 +24,15 @@ except ImportError:
     _SA_AVAILABLE = False
 
 
-# ── Üretilebilirlik: SA Score ─────────────────────────────────────────────────
+# ── Manufacturability: SA Score ───────────────────────────────────────────────
 
 def _sa_score_to_10(smiles: str) -> float:
     """
-    RDKit SA Score'u (1=kolay, 10=zor) platforma uygun 0-10'a dönüştürür.
+    Converts RDKit SA Score (1=easy, 10=hard) to platform scale (0-10).
     SA Score 1 → 10/10, SA Score 10 → 0/10
     """
     if not _RDKIT_AVAILABLE:
-        return 5.0  # varsayılan
+        return 5.0  # default
 
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -41,12 +40,12 @@ def _sa_score_to_10(smiles: str) -> float:
 
     if _SA_AVAILABLE:
         try:
-            sa = sascorer.calculateScore(mol)     # 1-10 (düşük = kolay)
+            sa = sascorer.calculateScore(mol)  # 1-10 (low = easy)
             return round((10.0 - sa) / 9.0 * 10.0, 2)
         except Exception:
             pass
 
-    # SA Score yoksa QED kullan (0-1 → 0-10)
+    # Fallback to QED if SA Score unavailable (0-1 → 0-10)
     try:
         q = calc_qed(mol)
         return round(q * 10.0, 2)
@@ -54,21 +53,21 @@ def _sa_score_to_10(smiles: str) -> float:
         return 5.0
 
 
-# ── Yenilik: Tanimoto Çeşitliliği ────────────────────────────────────────────
+# ── Novelty: Tanimoto Diversity ───────────────────────────────────────────────
 
 def _compute_novelty_scores(candidates: list) -> dict:
     """
-    Her aday için yenilik skoru hesaplar.
-    Diğer adaylara ortalama Tanimoto benzerliğinin tersi kullanılır.
-    Çok benziyorsa → düşük yenilik, çok farklıysa → yüksek yenilik.
+    Computes novelty score for each candidate.
+    Uses inverse of average Tanimoto similarity to other candidates.
+    High similarity → low novelty, high diversity → high novelty.
 
     Returns:
-        {candidate_id: novelty_score (0-10)} sözlüğü
+        {candidate_id: novelty_score (0-10)}
     """
     if not _RDKIT_AVAILABLE or len(candidates) < 2:
         return {c["id"]: 5.0 for c in candidates}
 
-    # Morgan parmak izlerini hesapla
+    # Compute Morgan fingerprints
     fps = {}
     for c in candidates:
         mol = Chem.MolFromSmiles(c["smiles"])
@@ -76,8 +75,6 @@ def _compute_novelty_scores(candidates: list) -> dict:
             fps[c["id"]] = AllChem.GetMorganFingerprintAsBitVect(mol, 2, 2048)
 
     scores = {}
-    ids = list(fps.keys())
-
     for cid, fp in fps.items():
         similarities = []
         for other_id, other_fp in fps.items():
@@ -88,13 +85,13 @@ def _compute_novelty_scores(candidates: list) -> dict:
 
         if similarities:
             avg_sim = sum(similarities) / len(similarities)
-            novelty = (1.0 - avg_sim) * 10.0  # benzersizlik → 0-10
+            novelty = (1.0 - avg_sim) * 10.0  # uniqueness → 0-10
         else:
             novelty = 5.0
 
         scores[cid] = round(min(10.0, max(0.0, novelty)), 2)
 
-    # fps olmayan adaylara ortalama ver
+    # Assign average score to candidates without fingerprints
     avg = sum(scores.values()) / len(scores) if scores else 5.0
     for c in candidates:
         if c["id"] not in scores:
@@ -103,20 +100,19 @@ def _compute_novelty_scores(candidates: list) -> dict:
     return scores
 
 
-# ── Kompozit Skor ─────────────────────────────────────────────────────────────
+# ── Composite Score ───────────────────────────────────────────────────────────
 
 def compute_scores(candidates: list) -> list:
     """
-    Tüm adaylar için üretilebilirlik + yenilik hesaplar,
-    mevcut binding ve ADMET skorlarıyla birleştirerek kompozit skor üretir.
+    Computes manufacturability and novelty scores for all candidates,
+    combines with binding and ADMET scores into a composite score.
 
     Args:
-        candidates: binding_score ve admet_score içeren sözlük listesi
+        candidates: list of dicts with binding_score and admet_score
 
     Returns:
-        Kompozit skora göre azalan sırada sıralanmış liste
+        List sorted by composite score (descending)
     """
-    # Yenilik skorlarını bir kerede hesapla (karşılaştırmalı)
     novelty_map = _compute_novelty_scores(candidates)
 
     scored = []
@@ -145,7 +141,7 @@ def compute_scores(candidates: list) -> list:
 
 
 def select_lab_candidates(scored: list) -> list:
-    """Eşik filtresi uygular ve en iyi TOP_N adayı döner."""
+    """Applies threshold filter and returns top N candidates."""
     filtered = [
         c for c in scored
         if c.get("composite_score", 0) >= config.MIN_COMPOSITE_SCORE
@@ -156,7 +152,7 @@ def select_lab_candidates(scored: list) -> list:
 
 
 def get_statistics(scored: list) -> dict:
-    """Özet istatistikler."""
+    """Returns summary statistics."""
     if not scored:
         return {}
     composites = [c["composite_score"] for c in scored]
